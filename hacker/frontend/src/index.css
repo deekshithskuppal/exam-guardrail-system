@@ -1,0 +1,11 @@
+/* Tailwind base + component + utility layers */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global font override — uses Inter loaded from Google Fonts in index.html */
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
