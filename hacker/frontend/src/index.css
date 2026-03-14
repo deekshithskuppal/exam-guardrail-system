@@ -3,9 +3,48 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Global font override — uses Inter loaded from Google Fonts in index.html */
+:root {
+  color-scheme: light;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  min-width: 320px;
+  background: linear-gradient(180deg, #fff9f0 0%, #ffe8ca 36%, #f6d0a5 100%);
+  color: #1c1917;
+  font-family: 'Source Sans 3', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: 'Sora', 'Source Sans 3', sans-serif;
+}
+
+::selection {
+  background: rgba(251, 146, 60, 0.25);
+  color: #1c1917;
+}
+
+@keyframes sunrise-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(0.5rem, -0.8rem, 0) scale(1.03);
+  }
+}
+
+.sunrise-float {
+  animation: sunrise-float 12s ease-in-out infinite;
 }

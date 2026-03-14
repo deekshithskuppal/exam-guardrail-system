@@ -68,3 +68,18 @@ class ExamSessionOut(BaseModel):
     status: str
     trust_score: int
     start_time: datetime
+
+
+# ── Session Summary (for admin dashboard) ──
+
+
+class SessionSummaryOut(BaseModel):
+    """Flattened session row for the auditor dashboard table."""
+
+    id: str
+    student: str
+    studentId: str
+    startedAt: str
+    status: str
+    trustScore: int
+    violations: int

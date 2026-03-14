@@ -19,6 +19,18 @@ hacker/
   ```bash
   pip install -r requirements.txt
   ```
+- Create `.env` from the committed template in `hacker/backend` (auto-loaded):
+  ```bash
+  cp .env.example .env
+  ```
+- Quick local PostgreSQL (Docker):
+  ```bash
+  docker run --name sentinel-postgres \
+    -e POSTGRES_USER=postgres \
+    -e POSTGRES_PASSWORD=postgres \
+    -e POSTGRES_DB=sentinel \
+    -p 5432:5432 -d postgres:16
+  ```
 - Run backend:
   ```bash
   uvicorn main:app --reload
@@ -37,7 +49,9 @@ hacker/
 - Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## Environment Variables
-- Backend: Set your PostgreSQL credentials in `backend/database.py` or use environment variables for production.
+- Backend:
+  - `DATABASE_URL` (recommended in `.env`; defaults to local dev URL if omitted)
+  - `SQL_ECHO` (`true` or `false`, optional)
 
 ## Features
 - Real-time exam monitoring

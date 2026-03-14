@@ -3,9 +3,10 @@
  *
  * Routes:
  *   /           → Student Login
- *   /admin      → Auditor Login
+ *   /teacher    → Teacher Login
+ *   /admin      → Teacher Login (alias)
  *   /exam       → Student Exam View
- *   /dashboard  → Auditor Dashboard
+ *   /dashboard  → Teacher Dashboard
  */
 
 import { Routes, Route } from 'react-router-dom'
@@ -18,6 +19,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Login />} />
+      <Route path="/teacher" element={<AdminLogin />} />
       <Route path="/admin" element={<AdminLogin />} />
       <Route path="/exam" element={<ExamView />} />
       <Route path="/dashboard" element={<AuditorDashboard />} />

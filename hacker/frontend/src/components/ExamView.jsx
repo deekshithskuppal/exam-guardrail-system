@@ -12,6 +12,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Shield, Clock, Link2, CheckCircle2, AlertTriangle, ChevronDown, Send } from 'lucide-react'
+import { WS_BASE_URL } from '../config/network'
 
 // ── Sample questions ──────────────────────────────────────────────────────────
 const QUESTIONS = [
@@ -42,6 +43,14 @@ const QUESTIONS = [
   },
 ]
 
+const ANSWER_KEY = {
+  1: 'Mars',
+  2: 'H2O',
+  3: 'William Shakespeare',
+  4: 'Pacific Ocean',
+  5: '1969',
+}
+
 // ── Sample allowed resources ──────────────────────────────────────────────────
 const ALLOWED_RESOURCES = [
   { title: 'Course Textbook (PDF)', url: '#' },
@@ -52,7 +61,19 @@ const ALLOWED_RESOURCES = [
 export default function ExamView() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { fullName = 'Student', studentId = 'STU-000' } = location.state || {}
+  const {
+    fullName = 'Student',
+    studentId = 'STU-000',
+    adminId = '',
+    adminIds: incomingAdminIds = [],
+  } = location.state || {}
+  const sessionIdRef = useRef(crypto.randomUUID())
+  const normalizedAdminIds = Array.isArray(incomingAdminIds)
+    ? incomingAdminIds.map((value) => String(value).trim()).filter(Boolean)
+    : []
+  const effectiveAdminIds = normalizedAdminIds.length > 0
+    ? normalizedAdminIds
+    : (adminId ? [adminId] : [])
 
   // ── State ───────────────────────────────────────────────────────────────────
   const [answers, setAnswers] = useState({})
@@ -60,6 +81,8 @@ export default function ExamView() {
   const [showResources, setShowResources] = useState(false)
   const [toasts, setToasts] = useState([])   // violation toast stack
   const [submitted, setSubmitted] = useState(false)
+  const [violationCount, setViolationCount] = useState(0)
+  const [resultSheet, setResultSheet] = useState(null)
   const wsRef = useRef(null)
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -71,18 +94,68 @@ export default function ExamView() {
 
   const sendEvent = useCallback((eventType, payload = {}) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ event_type: eventType, payload }))
+      wsRef.current.send(
+        JSON.stringify({
+          event_type: eventType,
+          payload: {
+            ...payload,
+            student_id: studentId,
+            student_name: fullName,
+            admin_id: effectiveAdminIds[0] || '',
+            admin_ids: effectiveAdminIds,
+          },
+        })
+      )
     }
-  }, [])
+  }, [effectiveAdminIds, fullName, studentId])
+
+  const buildResultSheet = useCallback((currentAnswers, currentViolations) => {
+    const score = QUESTIONS.reduce((sum, question) => {
+      const selected = currentAnswers[question.id]
+      return selected === ANSWER_KEY[question.id] ? sum + 1 : sum
+    }, 0)
+    const totalQuestions = QUESTIONS.length
+    const finalPercentage = Number(((score / totalQuestions) * 100).toFixed(2))
+
+    return {
+      student_name: fullName,
+      student_id: studentId,
+      score,
+      total_questions: totalQuestions,
+      violations: currentViolations,
+      final_percentage: finalPercentage,
+    }
+  }, [fullName, studentId])
+
+  const finalizeSubmission = useCallback((submitReason) => {
+    if (submitted) return
+    const sheet = buildResultSheet(answers, violationCount)
+    setResultSheet(sheet)
+    sendEvent('EXAM_SUBMITTED', {
+      answers,
+      submit_reason: submitReason,
+      result_sheet: sheet,
+    })
+    setSubmitted(true)
+  }, [answers, buildResultSheet, sendEvent, submitted, violationCount])
 
   // ── WebSocket connection ────────────────────────────────────────────────────
   useEffect(() => {
-    const ws = new WebSocket(`ws://localhost:8000/ws/student/${studentId}`)
+    const sessionId = sessionIdRef.current
+    const params = new URLSearchParams()
+    if (effectiveAdminIds[0]) {
+      params.set('admin_id', effectiveAdminIds[0])
+    }
+    if (effectiveAdminIds.length > 0) {
+      params.set('admin_ids', effectiveAdminIds.join(','))
+    }
+    const query = params.toString()
+    const ws = new WebSocket(`${WS_BASE_URL}/ws/student/${sessionId}${query ? `?${query}` : ''}`)
     wsRef.current = ws
     ws.onopen = () => console.log('[WS] Student connected')
     ws.onclose = () => console.log('[WS] Student disconnected')
     return () => ws.close()
-  }, [studentId])
+  }, [effectiveAdminIds])
 
   // ── Countdown timer ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -91,38 +164,145 @@ export default function ExamView() {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval)
-          setSubmitted(true)
+          finalizeSubmission('timeout')
           return 0
         }
         return prev - 1
       })
     }, 1000)
     return () => clearInterval(interval)
-  }, [submitted])
+  }, [finalizeSubmission, submitted])
 
   // ── Integrity listeners ─────────────────────────────────────────────────────
   useEffect(() => {
+    if (submitted) return undefined
+
+    const keyState = {
+      ctrlOrMeta: false,
+      alt: false,
+      tab: false,
+    }
+    let lastKeyboardSwitchAt = 0
+
+    const registerViolation = (reason, message, options = {}) => {
+      if (options.preventDefault) {
+        options.preventDefault.preventDefault()
+      }
+      setViolationCount((prev) => prev + 1)
+      sendEvent('VIOLATION_DETECTED', { reason })
+      addToast(message)
+    }
+
     // Tab-switch detection
     const handleVisibility = () => {
       if (document.hidden) {
-        sendEvent('VIOLATION_DETECTED', { reason: 'Tab switched / window hidden' })
-        addToast('⚠️ Tab switch detected — this has been recorded.')
+        registerViolation(
+          'Tab switched / window hidden (possible Alt+Tab or app switch)',
+          'Tab or window switch detected. This has been recorded.'
+        )
       }
     }
+
+    const handleKeydown = (e) => {
+      const key = String(e.key || '').toLowerCase()
+      const withModifier = e.ctrlKey || e.metaKey
+
+      keyState.ctrlOrMeta = e.ctrlKey || e.metaKey
+      keyState.alt = e.altKey
+      if (key === 'tab') {
+        keyState.tab = true
+      }
+
+      if (withModifier && key === 'c') {
+        registerViolation(
+          'Copy shortcut attempt (Ctrl/Cmd+C)',
+          'Copy shortcut detected. This has been recorded.',
+          { preventDefault: e }
+        )
+        return
+      }
+
+      if (withModifier && key === 'v') {
+        registerViolation(
+          'Paste shortcut attempt (Ctrl/Cmd+V)',
+          'Paste shortcut detected. This has been recorded.',
+          { preventDefault: e }
+        )
+        return
+      }
+
+      if (e.altKey && key === 'tab') {
+        registerViolation(
+          'Windows app switch attempt (Alt+Tab)',
+          'Alt+Tab switch attempt detected.',
+          { preventDefault: e }
+        )
+        return
+      }
+
+      if (e.ctrlKey && key === 'tab') {
+        lastKeyboardSwitchAt = Date.now()
+        registerViolation(
+          'Browser tab switch attempt (Ctrl+Tab)',
+          'Ctrl+Tab switch attempt detected.',
+          { preventDefault: e }
+        )
+        return
+      }
+
+      if ((e.metaKey || e.ctrlKey) && key === 'tab') {
+        lastKeyboardSwitchAt = Date.now()
+        registerViolation(
+          'Keyboard tab switch attempt (Ctrl/Cmd+Tab)',
+          'Keyboard tab switch attempt detected.',
+          { preventDefault: e }
+        )
+      }
+    }
+
+    const handleKeyup = (e) => {
+      const key = String(e.key || '').toLowerCase()
+      if (key === 'tab') keyState.tab = false
+      if (key === 'alt') keyState.alt = false
+      if (key === 'control' || key === 'meta') keyState.ctrlOrMeta = false
+    }
+
+    const handleWindowBlur = () => {
+      const keyboardSwitch = keyState.tab && (keyState.ctrlOrMeta || keyState.alt)
+      if (!keyboardSwitch) return
+
+      const now = Date.now()
+      if (now - lastKeyboardSwitchAt < 600) return
+      lastKeyboardSwitchAt = now
+
+      registerViolation(
+        'Keyboard-driven window/tab switch detected',
+        'Keyboard tab/window switch detected. This has been recorded.'
+      )
+    }
+
     // Right-click prevention
     const handleContextMenu = (e) => {
-      e.preventDefault()
-      sendEvent('VIOLATION_DETECTED', { reason: 'Right-click attempt' })
-      addToast('⚠️ Right-click is disabled during the exam.')
+      registerViolation(
+        'Right-click attempt',
+        'Right-click is disabled during the exam.',
+        { preventDefault: e }
+      )
     }
 
     document.addEventListener('visibilitychange', handleVisibility)
+    document.addEventListener('keydown', handleKeydown)
+    document.addEventListener('keyup', handleKeyup)
     document.addEventListener('contextmenu', handleContextMenu)
+    window.addEventListener('blur', handleWindowBlur)
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility)
+      document.removeEventListener('keydown', handleKeydown)
+      document.removeEventListener('keyup', handleKeyup)
       document.removeEventListener('contextmenu', handleContextMenu)
+      window.removeEventListener('blur', handleWindowBlur)
     }
-  }, [sendEvent, addToast])
+  }, [sendEvent, addToast, submitted])
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleAnswer = (questionId, option) => {
@@ -131,8 +311,7 @@ export default function ExamView() {
   }
 
   const handleSubmit = () => {
-    sendEvent('EXAM_SUBMITTED', { answers })
-    setSubmitted(true)
+    finalizeSubmission('manual')
   }
 
   // ── Format mm:ss ────────────────────────────────────────────────────────────
@@ -142,15 +321,44 @@ export default function ExamView() {
 
   // ── Submitted state ─────────────────────────────────────────────────────────
   if (submitted) {
+    const sheet = resultSheet || buildResultSheet(answers, violationCount)
+
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-2xl shadow-lg p-10 text-center max-w-md space-y-4">
-          <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto" />
-          <h2 className="text-2xl font-bold text-gray-900">Exam Submitted</h2>
-          <p className="text-gray-500">Your responses have been securely recorded.</p>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-xl space-y-6 border border-gray-100">
+          <div className="text-center space-y-2">
+            <CheckCircle2 className="w-14 h-14 text-green-500 mx-auto" />
+            <h2 className="text-2xl font-bold text-gray-900">Exam Submitted</h2>
+            <p className="text-gray-500">Your result sheet is generated and shared with the auditor dashboard.</p>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700">Result Sheet</h3>
+            </div>
+            <div className="divide-y divide-gray-100 text-sm">
+              <div className="px-4 py-3 flex items-center justify-between">
+                <span className="text-gray-500">Student Name</span>
+                <span className="font-semibold text-gray-900">{sheet.student_name}</span>
+              </div>
+              <div className="px-4 py-3 flex items-center justify-between">
+                <span className="text-gray-500">Score</span>
+                <span className="font-semibold text-gray-900">{sheet.score} / {sheet.total_questions}</span>
+              </div>
+              <div className="px-4 py-3 flex items-center justify-between">
+                <span className="text-gray-500">Violations</span>
+                <span className="font-semibold text-gray-900">{sheet.violations}</span>
+              </div>
+              <div className="px-4 py-3 flex items-center justify-between">
+                <span className="text-gray-500">Final Percentage</span>
+                <span className="font-semibold text-gray-900">{sheet.final_percentage}%</span>
+              </div>
+            </div>
+          </div>
+
           <button
             onClick={() => navigate('/')}
-            className="mt-4 px-6 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors"
+            className="w-full px-6 py-2.5 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors font-semibold"
           >
             Return to Login
           </button>

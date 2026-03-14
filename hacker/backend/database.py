@@ -5,18 +5,28 @@ Uses `create_async_engine` so every DB call goes through asyncpg,
 keeping the FastAPI / WebSocket event loop non-blocking.
 """
 
+import os
+
+from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.ext.asyncio import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase
 
-# ── Connection string (swap with real credentials / env-var in production) ──
-DATABASE_URL = "postgresql+asyncpg://user:pass@localhost/dbname"
+# Auto-load variables from a local .env file when present.
+load_dotenv()
+
+# ── Connection string (read from env; local default for dev) ──
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinel",
+)
+SQL_ECHO = os.getenv("SQL_ECHO", "false").lower() == "true"
 
 # ── Engine — pool_pre_ping keeps stale connections from crashing queries ──
-engine = create_async_engine(DATABASE_URL, echo=True, pool_pre_ping=True)
+engine = create_async_engine(DATABASE_URL, echo=SQL_ECHO, pool_pre_ping=True)
 
 # ── Session factory — expire_on_commit=False lets us read attrs after commit ─
 async_session = async_sessionmaker(

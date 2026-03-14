@@ -15,9 +15,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database import get_db
-from ..models import ExternalResource
-from ..schemas import ResourceCreate, ResourceOut
+try:
+    from ..database import get_db
+    from ..models import ExternalResource
+    from ..schemas import ResourceCreate, ResourceOut
+except ImportError:
+    from database import get_db
+    from models import ExternalResource
+    from schemas import ResourceCreate, ResourceOut
 
 router = APIRouter(prefix="/api/v1/resources", tags=["Resources"])
 

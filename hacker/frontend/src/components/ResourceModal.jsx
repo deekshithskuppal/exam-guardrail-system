@@ -7,8 +7,9 @@
 
 import { useState, useEffect } from 'react'
 import { X, Plus, Trash2, ExternalLink, Loader2 } from 'lucide-react'
+import { API_BASE_URL } from '../config/network'
 
-const API = 'http://localhost:8000/api/v1/resources'
+const API = `${API_BASE_URL}/api/v1/resources`
 
 export default function ResourceModal({ isOpen, onClose }) {
   const [resources, setResources] = useState([])

@@ -1,0 +1,12 @@
+{
+  "name": "exam-guardrail-system",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix hacker/frontend",
+    "build": "npm run build --prefix hacker/frontend",
+    "preview": "npm run preview --prefix hacker/frontend",
+    "install:frontend": "npm install --prefix hacker/frontend",
+    "install:backend": "pip install -r hacker/backend/requirements.txt"
+  }
+}
